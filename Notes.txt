@@ -1,0 +1,12 @@
+
+Encode length
+4 bytes
+4*8 = 32
+
+encode per pixel
+4 bits
+
+
+36 bits
+
+12 pixels
