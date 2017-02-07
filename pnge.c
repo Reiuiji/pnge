@@ -4,21 +4,23 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdint.h>
+#include <openssl/conf.h>
 
 //Enable debug mode (1)
 #define DEBUG 1
+#define ENCODE 3
 #define equilize 0
 
 typedef struct DataPayload
 {
 	char *buffer;
-	unsigned int bufsize;
-	uint64_t length;
+	uint64_t length; //Length in characters for char array
+	uint32_t encode;
 
 } DataPayload ;
 
 int mode = 1;
-unsigned int encode = 3;
+//unsigned int encode = 6;
 
 /* Header info */
 int headerheight = 1;
@@ -146,12 +148,21 @@ void print_value_bin(uint64_t value, int lenth) {
 
 }
 
+void print_value_bit(uint64_t value,int length) {
+	uint64_t i;
+    printf("(");
+	for (i = 1UL << length -1; i > 0; i = i / 2)
+        (value & i)? printf("1"): printf("0");
+    printf(")");
+}
+
 void encode_png_header() {
-	if(DEBUG) {
+	if(DEBUG == 2) {
 		printf("Encoding header in png\n");
 		printf("\tdata.length: %lu\n",data.length);
 		print_value_bin(data.length,CHAR_BIT*sizeof(data.length));
-		printf("\tencode per pixel: %u\n",encode);
+		printf("\tencode per pixel: %u\n",data.encode);
+		print_value_bin(data.encode,CHAR_BIT*sizeof(data.encode));
 		printf("bit\t   x,    y = RGBA( R,  G,  B,  A)\n");
 	}
 	//uint64_t length = UINTMAX_MAX - 2;
@@ -161,6 +172,7 @@ void encode_png_header() {
 	//printf ("length in binary: %s\n",buffer);
 
 	int pos = 0;
+	int state = 0;
 	for(int y = 0; y < headerheight; y++) {
 		png_bytep row = row_pointers[y];
 		for(int x = 0; x < headerwidth; x++) {
@@ -169,21 +181,29 @@ void encode_png_header() {
 			//if(DEBUG)
 			//	printf("   [Org: %4d, %4d = RGBA(%x, %x, %x, %x)]\n", x, y, px[0], px[1], px[2], px[3]);
 			for(int z = 0; z < 3; z++) {
-				if(pos < 64) {
-					if(DEBUG)
+				if(state == 0) {
+					if(DEBUG == 2)
 						printf("%lu",( (data.length & ( 1UL << pos )) >> pos ));
 					px[z] = (px[z] & 0xFE) + ( (data.length & ( 1UL << pos )) >> pos );
 					pos++;
-				} else if (pos < 80) {
-					if(DEBUG)
-						printf("%d",( (encode & ( 1 << (pos-32) )) >> (pos-32) ));
-					px[z] = (px[z] & 0xFE) + ( (encode & ( 1 << (pos-32) )) >> (pos-32) );
+					if(pos >= 64) {
+						state = 1;
+						pos = 0;
+					}
+				} else if (state == 1) {
+					if(DEBUG == 2)
+						printf("%d",( (data.encode & ( 1 << pos )) >> (pos) ));
+					px[z] = (px[z] & 0xFE) + ( (data.encode & ( 1 << pos )) >> pos );
 					pos++;
+					if(pos >= 32) {
+						state = 2;
+						pos = 0;
+					}
 				} else
 					break;
 			}
 
-			if(DEBUG)
+			if(DEBUG == 2)
 				printf("\t%4d, %4d = RGBA(%x, %x, %x, %x)]\n", x, y, px[0], px[1], px[2], px[3]);
 		}
 	}
@@ -193,8 +213,9 @@ void decode_png_header() {
 	int pos = 0;
 	uint64_t len = 0;
 	int enc = 0;
+	int state = 0;
 
-	if(DEBUG) {
+	if(DEBUG == 2) {
 		printf("Decoding header of png image\n");
 		printf("bit\t   x,    y = RGBA( R,  G,  B,  A)\n");
 	}
@@ -205,27 +226,35 @@ void decode_png_header() {
 			png_bytep px = &(row[x * 4]);
 
 			for(int z = 0; z < 3; z++) {
-				if(pos < 64) {
-					if(DEBUG) {
+				if(state == 0) {
+					if(DEBUG == 2) {
 						printf("%lu",(px[z] & 1UL));
 					}
 					len += (px[z] & 1UL) << pos;
 					pos++;
-				} else if (pos < 80) {
-					if(DEBUG)
+					if(pos >= 64) {
+						state = 1;
+						pos = 0;
+					}
+				} else if (state == 1) {
+					if(DEBUG == 2)
 						printf("%d",(px[z] & 0x01));
 					enc += (px[z] & 0x01) << (pos-32);
 					pos++;
+					if(pos >= 32) {
+						state = 2;
+						pos = 0;
+					}
 				} else
 					break;
 			}
 
-			if(DEBUG)
+			if(DEBUG == 2)
 				printf("\t%4d, %4d = RGBA(%x, %x, %x, %x)\n", x, y, px[0], px[1], px[2], px[3]);
 		}
 	}
 
-	if(DEBUG)
+	if(DEBUG == 2)
 	{
 		printf("\tLength: %lu\n",len);
 		print_value_bin(len,CHAR_BIT*sizeof(len));
@@ -235,27 +264,77 @@ void decode_png_header() {
 
 	/* Create Data Payload */
 	data.length = len;
-	encode = enc;
-	data.bufsize = data.length / (sizeof(char) * 8);
-	data.buffer = malloc(sizeof(char) * (data.bufsize + 1));
+	data.encode = enc;
+	data.buffer = malloc(sizeof(char) * (data.length + 1));
+    /* Initilize memory to zero (could use calloc but this is equivalent)*/
+    memset(data.buffer,0,data.length + 1);
 }
 
 void encode_png_file() {
-	int pos = 0;
-	int loc = 0;
-	int locbit = 0;
+	//Bit position
+	int bitpos = 0;
+	//character Buffer position
+	int buffpos = 0;
+	
+	//Temp value for each bit encoding
+	int byteencode = 0;
+	uint8_t ANDencode = 0xFF << data.encode;//(0xFF << data.encode) & 0xFF;
+	
+	if(DEBUG) {
+		printf("Encoding data into png\n");
+	}
+	
+	//Calculate value to AND with pixed
+	//[TODO] Not ANDING Properly [ 44 ->  45 (px[z] & 255 ) + 1]
+	// FIX need to test encoding is properly done. Note Little endian format
+	//printf("AND: %d\n",ANDencode);
+	
+	//starts on the next line after the header height
 	for(int y = headerheight; y < height; y++) {
 		png_bytep row = row_pointers[y];
 		for(int x = 0; x < width; x++) {
 			png_bytep px = &(row[x * 4]);
 
-			if(pos < data.length)
+			for(int z = 0; z < 3; z++) {
+				byteencode = 0;
+				for (int b = 0; b < data.encode; b++) {
+					byteencode += ( (data.buffer[buffpos] & (1 << bitpos)) >> bitpos ) << b;
+				    if(DEBUG == 3)
+					    printf("%d",(data.buffer[buffpos] & (1 << bitpos)) >> bitpos);
+					bitpos++;
+					if(bitpos >= 8) {
+
+				        if(DEBUG == 3)
+						    printf("[%c]",data.buffer[buffpos]);
+						bitpos = 0;
+						buffpos++;
+						if(buffpos >= data.length)
+							break;
+					}
+				}
+				if(DEBUG == 3)
+					printf(" [%3x -> ",px[z]);
+				px[z] = (px[z] & ANDencode ) + byteencode;
+				if(DEBUG == 3)
+					printf("%3x (px[z] & %d ) + %d]",px[z],ANDencode,byteencode);
+				if(buffpos >= data.length) {
+					if(DEBUG == 3)
+						printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
+					//Complete and returning
+					return;
+				}
+			}
+			if(DEBUG == 3)
+				printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
+			
+			
+			/* if(pos < data.length)
 			{
 				//if(DEBUG)
 				//	printf("\n+%4d,%4d, %4d = RGBA(%3x, %3x, %3x, %3x)", pos,loc, locbit, px[0], px[1], px[2], px[3]);
 
-				for(int z = 0; z < 4; z++) {
-					for (int i = 0; i < encode; i++)
+				for(int z = 0; z < 3; z++) {
+					for (int i = 0; i < data.encode; i++)
 					{
 						loc = pos/8;
 						locbit = pos%8;
@@ -278,21 +357,78 @@ void encode_png_file() {
 			else
 			{
 				if(equilize)
-					for(int z = 0; z < 4; z++) {
-						px[z] = px[z] & (0xFF - ((1 << encode+1) -1) ) ;
+					for(int z = 0; z < 3; z++) {
+						px[z] = px[z] & (0xFF - ((1 << data.encode+1) -1) ) ;
 					}
 			}
 			// Do something awesome for each pixel here...
 			//printf("%4d, %4d = RGBA(%3d, %3d, %3d, %3d)\n", x, y, px[0], px[1], px[2], px[3]);
+			*/
 		}
 	}
 }
 
+void decode_png_file() {
+	//Bit position
+	int bitpos = 0;
+	//character Buffer position
+	int buffpos = 0;
+	
+	//Temp value for each bit encoding
+	uint8_t byteencode = 0;
 
+	uint8_t ANDencode = 0xFF << data.encode;//(0xFF << data.encode) & 0xFF;
+	ANDencode = ~ANDencode; //NOT to invert for only the bits we need
+	//printf("~AND: %d\n",ANDencode);
+	
+	if(DEBUG) {
+		printf("Decoding data into png\n");
+	}
+	
+	//starts on the next line after the header height
+	for(int y = headerheight; y < height; y++) {
+		png_bytep row = row_pointers[y];
+		for(int x = 0; x < width; x++) {
+			png_bytep px = &(row[x * 4]);
+
+			for(int z = 0; z < 3; z++) {
+				byteencode = px[z] & ANDencode;
+                //printf("{%x}",byteencode);
+				for (int b = 0; b < data.encode; b++) {
+                    data.buffer[buffpos] += ((byteencode & (1 << b)) >> b) << bitpos;
+					//printf("%d",((byteencode & (1 << b)) >> b) << bitpos);
+                    //print_value_bit(data.buffer[buffpos],CHAR_BIT*sizeof(data.buffer[buffpos]));
+					bitpos++;
+					if(bitpos >= 8) {
+                        //print_value_bit(data.buffer[buffpos],CHAR_BIT*sizeof(data.buffer[buffpos]));
+						//printf("[%c]",data.buffer[buffpos]);
+						bitpos = 0;
+						buffpos++;
+						if(buffpos >= data.length)
+							break;
+					}
+				}
+				if(buffpos >= data.length) {
+					if(DEBUG == 3)
+						printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
+					//Complete and returning
+					return;
+				}
+			}
+			if(DEBUG == 3)
+				printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
+		}
+	}
+}
+
+/*
 void decode_png_file() {
 	int pos = 0;
 	int loc = 0;
 	int locbit = 0;
+	if(DEBUG) {
+		printf("\n\nDecoding data into png\n");
+	}
 	for(int y = headerheight; y < height; y++) {
 		png_bytep row = row_pointers[y];
 		for(int x = 0; x < width; x++) {
@@ -300,14 +436,16 @@ void decode_png_file() {
 
 			if(pos < data.length)
 			{
-				for(int z = 0; z < 4; z++) {
-					for (int i = 0; i < encode; i++)
+				for(int z = 0; z < 3; z++) {
+					for (int i = 0; i < data.encode; i++)
 					{
 						loc = pos/8;
 						locbit = pos%8;
-                        printf("%d",((px[z] >> i) & 1));
-                        if(pos%8 == 7)
-                            printf(",");
+						if(DEBUG == 3) {
+		                    printf("%d",((px[z] >> i) & 1));
+		                    if(pos%8 == 7)
+		                        printf(",");
+						}
 						if(pos < 32)
 						{
 							//printf("<%d,%d>",loc,locbit);
@@ -328,18 +466,23 @@ void decode_png_file() {
 							break;
 					}
 				}
-				if(DEBUG)
+				if(DEBUG == 3)
 					printf("\n%4d, %4d = RGBA(%3d, %3d, %3d, %3d)", loc, locbit, px[0], px[1], px[2], px[3]);
 			}
 			else
 			{
+				if(DEBUG) {
+					BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
+				}
 				return;
 			}
 			// Do something awesome for each pixel here...
 			//printf("%4d, %4d = RGBA(%3d, %3d, %3d, %3d)\n", x, y, px[0], px[1], px[2], px[3]);
 		}
 	}
+
 }
+*/
 
 
 void process_text(char *filename)
@@ -350,28 +493,28 @@ void process_text(char *filename)
 		/* Go to the end of the file. */
 		if (fseek(fp, 0L, SEEK_END) == 0) {
 			/* Get the size of the file. */
-			data.bufsize = ftell(fp);
-			if (data.bufsize == -1) { /* Error */ }
+			data.length = ftell(fp);
+			if (data.length == -1) { /* Error */ }
 
 			/* Allocate our buffer to that size. */
-			data.buffer = malloc(sizeof(char) * (data.bufsize + 1));
+			data.buffer = malloc(sizeof(char) * (data.length + 1));
 
 			/* Go back to the start of the file. */
 			if (fseek(fp, 0L, SEEK_SET) != 0) { /* Error */ }
 
 			/* Read the entire file into memory. */
-			size_t newLen = fread(data.buffer, sizeof(char), data.bufsize, fp);
+			size_t newLen = fread(data.buffer, sizeof(char), data.length, fp);
 			if ( ferror( fp ) != 0 ) {
 				fputs("Error reading file", stderr);
 			} else {
-				data.buffer[newLen++] = '\0'; /* Just to be safe. */
+				data.buffer[newLen] = '\0'; /* Just to be safe. */
 			}
 		}
 		fclose(fp);
 	}
 
 	//Calculate encode size
-	data.length = data.bufsize*sizeof(char)*8;//8 bits to a byte
+	//data.length = data.bufsize*sizeof(char)*8;//8 bits to a byte
 	/*if(data.bufsize*sizeof(char)*8%encode == 0)
 	  data.length = data.bufsize*sizeof(char)*8/encode;
 	  else
@@ -389,7 +532,7 @@ void write_text(char *filename)
 	DataPayload DP;
 	FILE *fp = fopen(filename, "wb");
 	if (fp != NULL) {
-		size_t newLen = fwrite(data.buffer, data.bufsize,sizeof(char),fp);
+		size_t newLen = fwrite(data.buffer, data.length,sizeof(char),fp);
 		fclose(fp);
 	}
 
@@ -399,15 +542,15 @@ void write_text(char *filename)
    Main process
    */
 int main(int argc, char *argv[]) {
-	if(argc != 4)
+	/*if(argc != 4)
 	{
 		printf("Usage: pnge [text] [in png] [out png]\n");
 		exit(-1);
-	}
+	}*/
 
 	if(mode == 1)
 	{
-
+		data.encode = ENCODE;
 		process_text(argv[1]);
 		read_png_file(argv[2]);
 
@@ -415,10 +558,10 @@ int main(int argc, char *argv[]) {
 		if(DEBUG)
 		{
 			printf("Data Length: %lu\n",data.length);
-			printf("Encode per byte: %d\n",encode);
+			printf("Encode per byte: %d\n",data.encode);
 			printf("Pic Max encode len: %d\n",width*height*4);
 			printf("Picture info:\n\tWidth:%d\n\tHeight:%d\n\tColor_Type:%d\n\tBit_Depth:%d\n",width,height,color_type,bit_depth);
-			printf("Encode percent: %lf\n", data.length/(float)(width*height*4*encode));
+			printf("Encode percent: %lf\n", data.length/(float)(width*height*4*data.encode));
 		}
 
 		/*for (int i = 0; i < data.bufsize; i++)
@@ -431,12 +574,16 @@ int main(int argc, char *argv[]) {
 
 		encode_png_header();
 		printf("\n\n");
+		encode_png_file();
+		BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
 
 
 		//[TODO]: Decode test
 		decode_png_header();
+		decode_png_file();
+		BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
+		write_text(argv[4]);
 
-		//encode_png_file();
 
 		//printf("\n\n");
 		close_data(data);
