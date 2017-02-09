@@ -1,4 +1,6 @@
-
+-----------------------
+- Math Scratch Pad
+-----------------------
 Encode length
 4 bytes
 4*8 = 32
@@ -10,3 +12,46 @@ encode per pixel
 36 bits
 
 12 pixels
+
+./pnge -Dfdirstv --encryption AES256 --iv asdfasdf --key fasfofa -m CBC test.zip Lenna.png Lenna_enc.png
+
+-----------------------
+- pnge Help Screen
+-----------------------
+Usage: pnge [OPTION]...  SOURCE_FILE SOURCE_IMG DEST_IMG
+  or:  pnge [OPTION]... -d SOURCE_IMAGE DEST_FILE
+  or:  pnge [OPTION]... -r SOURCE_IMAGE
+  or:  pnge [OPTION]... -s [eIkm] SOURCE_FILE SOURCE_IMG DEST_IMG
+Encode a SOURCE_FILE into a png SOURCE_IMG to DEST_IMG
+
+Mandatory arguments to long options are mandatory for short options too.
+Basic:
+  -b, --bitlevel               Set bit Encoding Level (1-8 bit per pixel)
+  -d, --decode                 Decode Image
+  -D, --debug                  Enable Debugging (Massive Text)
+  -f, --force                  Overwrite output location
+  -i, --interactive            Prompt before overwrite
+  -r, --run                    Run the decoded file (Use at one's risk)
+  -s, --secure                 Encrypt Contents inside image
+  -t, --test                   Test and validate encode/decode of the image
+  -v, --verbose                Explain what is being done
+
+      --help                   Display this help and exit
+      --version                Output version information and exit
+
+Image Settings:
+  -?, --WIP                    This section is still a work in progress
+
+Secure Mode: [-s, --secure]
+  -e, --encryption             Encryption Mode (AES256)
+  -I, --iv                     Encryption IV
+  -k, --key                    Encryption Key
+  -m, --mode                   Feedback Mode (CBC)
+
+
+By default, this application will encode a file (text,binary) into a png image.
+The png image will then be able to be decoded with '-d'. This utility is only
+a proof of concept to demonstrate the ability for image stenography with the
+threat of a hidden executable plain in site.
+
+pnge home page: <https://github.com/reiuiji/pnge>
