@@ -3,6 +3,11 @@
  * See COPYING for further information. 
  * ---
  * Copyright (C) 2017 Reiuiji
+ *
+ *
+ * Disclaimer!! This is still a work in progess application
+ * There is alot of features still missing.
+ *
  */
 
 #include <stdlib.h>
@@ -13,6 +18,9 @@
 #include <stdint.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <openssl/conf.h>
 #include <openssl/md5.h>
 
@@ -39,6 +47,7 @@ typedef struct pnge_options
 	int bitlevel;
 	bool decode;
 	bool debug;
+	bool equalize;
 	bool force;
 	bool interactive;
 	bool run;
@@ -75,6 +84,7 @@ static struct option const long_opts[] =
   {"secure", no_argument, NULL, 's'},
   {"test", no_argument, NULL, 't'},
   {"verbose", no_argument, NULL, 'v'},
+  {"equalize", no_argument, NULL, 'E'},
 
   {"encryption", required_argument, NULL, 'e'},
   {"iv", required_argument, NULL, 'I'},
@@ -323,19 +333,29 @@ void decode_png_header() {
     memset(data.buffer,0,data.length + 1);
 }
 
-void encode_png_file() {
+void encode_png_file(pnge_options options) {
 	//Bit position
 	int bitpos = 0;
 	//character Buffer position
 	int buffpos = 0;
+
+	int x,y,z;
+
+	//encode complete? use for equalize
+	bool complete = false;
 	
 	//Temp value for each bit encoding
 	int byteencode = 0;
 	uint8_t ANDencode = 0xFF << data.encode;//(0xFF << data.encode) & 0xFF;
+	uint8_t NOTencode = ~ANDencode;
 	
-	if(DEBUG) {
+	if(options.verbose) {
 		printf("Encoding data into png\n");
 	}
+
+	//Set random seed for equalize
+	time_t t;
+	srand((unsigned) time(&t));
 	
 	//Calculate value to AND with pixed
 	//[TODO] Not ANDING Properly [ 44 ->  45 (px[z] & 255 ) + 1]
@@ -343,82 +363,58 @@ void encode_png_file() {
 	//printf("AND: %d\n",ANDencode);
 	
 	//starts on the next line after the header height
-	for(int y = headerheight; y < height; y++) {
+	for(y = headerheight; y < height; y++) {
 		png_bytep row = row_pointers[y];
-		for(int x = 0; x < width; x++) {
+		for(x = 0; x < width; x++) {
 			png_bytep px = &(row[x * 4]);
 
-			for(int z = 0; z < 3; z++) {
-				byteencode = 0;
-				for (int b = 0; b < data.encode; b++) {
-					byteencode += ( (data.buffer[buffpos] & (1 << bitpos)) >> bitpos ) << b;
-				    if(DEBUG)
-					    printf("%d",(data.buffer[buffpos] & (1 << bitpos)) >> bitpos);
-					bitpos++;
-					if(bitpos >= 8) {
+			for(z = 0; z < 3; z++) {
+				/* complete so pipin random data inside the image to cover up */
+				if(complete) {
+					byteencode = rand() & NOTencode;
+					px[z] = (px[z] & ANDencode ) + (byteencode & NOTencode);
+				} else {
+					byteencode = 0;
+					for (int b = 0; b < data.encode; b++) {
+						byteencode += ( (data.buffer[buffpos] & (1 << bitpos)) >> bitpos ) << b;
+						if(DEBUG)
+							printf("%d",(data.buffer[buffpos] & (1 << bitpos)) >> bitpos);
+						bitpos++;
+						if(bitpos >= 8) {
 
-				        if(DEBUG)
-						    printf("[%c]",data.buffer[buffpos]);
-						bitpos = 0;
-						buffpos++;
-						if(buffpos >= data.length)
-							break;
+						    if(options.debug == 4)
+								printf("[%c]",data.buffer[buffpos]);
+							bitpos = 0;
+							buffpos++;
+							if(buffpos >= data.length)
+								break;
+						}
+					}
+					if(options.debug == 4)
+						printf(" [%3x -> ",px[z]);
+					px[z] = (px[z] & ANDencode ) + byteencode;
+					if(options.debug == 4)
+						printf("%3x (px[z] & %d ) + %d]",px[z],ANDencode,byteencode);
+					if(buffpos >= data.length) {
+						if(options.debug == 4)
+							printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
+						//Complete and returning
+						if(options.equalize) { 
+							complete = true;
+							if(options.verbose)
+								printf("Encoding complete, filling random data to equalize\n");
+						} else
+							return;
 					}
 				}
-				if(DEBUG)
-					printf(" [%3x -> ",px[z]);
-				px[z] = (px[z] & ANDencode ) + byteencode;
-				if(DEBUG)
-					printf("%3x (px[z] & %d ) + %d]",px[z],ANDencode,byteencode);
-				if(buffpos >= data.length) {
-					if(DEBUG)
-						printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
-					//Complete and returning
-					return;
-				}
 			}
-			if(DEBUG)
+			if(options.debug)
 				printf("\t %4d,%4d = RGBA(%3x, %3x, %3x, %3x)\n", x,y, px[0], px[1], px[2], px[3]);
-			
-			
-			/* if(pos < data.length)
-			{
-				//if(DEBUG)
-				//	printf("\n+%4d,%4d, %4d = RGBA(%3x, %3x, %3x, %3x)", pos,loc, locbit, px[0], px[1], px[2], px[3]);
-
-				for(int z = 0; z < 3; z++) {
-					for (int i = 0; i < data.encode; i++)
-					{
-						loc = pos/8;
-						locbit = pos%8;
-						px[z] = ( px[z] & (0xFF - (1 << i) ) )
-							+ ( ( (data.buffer[pos/8] >> (pos%8) ) & (1) ) << i );
-
-							//printf("%d",( (data.buffer[pos/8] >> (pos%8) ) & (1) ));
-							//if(pos%8 == 7)
-							//	printf(",");
-
-						pos++;
-						if(pos == data.length)
-							break;
-					}
-				}
-				//if(DEBUG)
-				//	printf("\n-%4d,%4d, %4d = RGBA(%3x, %3x, %3x, %3x)", pos,loc, locbit, px[0], px[1], px[2], px[3]);
-
-			}
-			else
-			{
-				if(equilize)
-					for(int z = 0; z < 3; z++) {
-						px[z] = px[z] & (0xFF - ((1 << data.encode+1) -1) ) ;
-					}
-			}
-			// Do something awesome for each pixel here...
-			//printf("%4d, %4d = RGBA(%3d, %3d, %3d, %3d)\n", x, y, px[0], px[1], px[2], px[3]);
-			*/
 		}
 	}
+	if(complete == false)
+		printf("\nWARNING!!! Overflow source image, possible data encoding loss\n\n");
+	return;
 }
 
 void decode_png_file() {
@@ -514,7 +510,7 @@ void process_text(char *filename)
 
 void close_data(DataPayload data)
 {
-	free(data.buffer); /* Don't forget to call free() later! */
+	free(data.buffer);
 }
 
 char * md5buffer(char *buffer, int length)
@@ -571,6 +567,7 @@ Basic:\n\
   -b, --bitlevel               Set bit Encoding Level (1-8 bit per pixel)\n\
   -d, --decode                 Decode Image\n\
   -D, --debug                  Enable Debugging (Massive Text)\n\
+  -E, --equalize               Equalize Encoding\n\
   -f, --force                  Overwrite output location\n\
   -i, --interactive            Prompt before overwrite\n\
   -r, --run                    Run the decoded file (Use at one's risk)\n\
@@ -609,6 +606,7 @@ void pnge_option_init(struct pnge_options *o)
 	o->bitlevel = 3;
 	o->decode = false;
 	o->debug = false;
+	o->equalize = false;
 	o->force = false;
 	o->interactive = false;
 	o->run = false;
@@ -636,7 +634,7 @@ int main(int argc, char *argv[]) {
 		exit(-1);
 	}*/
 
-	while ((c = getopt_long (argc, argv, "b:dDfirstvhVe:I:k:m:hV", long_opts, NULL)) != -1)
+	while ((c = getopt_long (argc, argv, "b:dDEfirstvhVe:I:k:m:hV", long_opts, NULL)) != -1)
 	{
 		switch(c)
 		{
@@ -653,6 +651,10 @@ int main(int argc, char *argv[]) {
 				o.debug = true;
 			break;
 
+			case 'E': //equalize
+				o.equalize = true;
+			break;
+
 			case 'f': //force
 				o.force = true;
 			break;
@@ -663,10 +665,14 @@ int main(int argc, char *argv[]) {
 
 			case 'r': //run
 				o.run = true;
+				printf("Disabled for safety\n");
+				exit (EXIT_SUCCESS);
 			break;
 
 			case 's': //secure mode enable
 				o.secure = true;
+				printf("Currently in development\n");
+				exit (EXIT_SUCCESS);
 			break;
 
 			case 't': //test mode
@@ -731,40 +737,40 @@ int main(int argc, char *argv[]) {
 			printf("Usage: pnge [OPTION]... -r SOURCE_IMAGE\n");
 			usage(EXIT_FAILURE);
 		} else {
-			o.source1 = malloc(sizeof(char) * strlen(argv[optind]));
-			strncpy(o.source1,argv[optind],sizeof(char) * strlen(argv[optind]));
+      o.source1 = malloc(sizeof(char) * strlen(argv[optind])+1);
+      sprintf(o.source1, "%s", argv[optind]);
 		}
 	else if(o.decode == true)//requires 2 argc
 		if(argc - optind != 2) {
 			printf("pnge [OPTION]... -d SOURCE_IMAGE DEST_FILE\n");
 			usage(EXIT_FAILURE);
 		} else {
-			o.source1 = malloc(sizeof(char) * strlen(argv[optind]));
-			strncpy(o.source1,argv[optind],sizeof(char) * strlen(argv[optind]));
-			o.dest = malloc(sizeof(char) * strlen(argv[optind+1]));
-			strncpy(o.dest,argv[optind+1],sizeof(char) * strlen(argv[optind+1]));
+      o.source1 = malloc(sizeof(char) * strlen(argv[optind])+1);
+      sprintf(o.source1, "%s", argv[optind]);
+      o.dest = malloc(sizeof(char) * strlen(argv[optind+1])+1);
+      sprintf(o.dest, "%s", argv[optind+1]);
 		}
 	else if(o.test == true)//requires 2 argc
 		if(argc - optind != 2) {
 			printf("pnge -t SOURCE_IMAGE DEST_FILE\n");
 			usage(EXIT_FAILURE);
 		} else {
-			o.source1 = malloc(sizeof(char) * strlen(argv[optind]));
-			strncpy(o.source1,argv[optind],sizeof(char) * strlen(argv[optind]));
-			o.source2 = malloc(sizeof(char) * strlen(argv[optind+1]));
-			strncpy(o.source2,argv[optind+1],sizeof(char) * strlen(argv[optind+1]));
+      o.source1 = malloc(sizeof(char) * strlen(argv[optind])+1);
+      sprintf(o.source1, "%s", argv[optind]);
+      o.source2 = malloc(sizeof(char) * strlen(argv[optind+1])+1);
+      sprintf(o.source2, "%s", argv[optind+1]);
 		}
 	else //requires 3 argc
 		if(argc - optind != 3) {
 			printf("pnge [OPTION]...  SOURCE_FILE SOURCE_IMG DEST_IMG\n");
 			usage(EXIT_FAILURE);
 		} else {
-			o.source1 = malloc(sizeof(char) * strlen(argv[optind]));
-			strncpy(o.source1,argv[optind],sizeof(char) * strlen(argv[optind]));
-			o.source2 = malloc(sizeof(char) * strlen(argv[optind+1]));
-			strncpy(o.source2,argv[optind+1],sizeof(char) * strlen(argv[optind+1]));
-			o.dest = malloc(sizeof(char) * strlen(argv[optind+2]));
-			strncpy(o.dest,argv[optind+2],sizeof(char) * strlen(argv[optind+2]));
+      o.source1 = malloc(sizeof(char) * strlen(argv[optind])+1);
+      sprintf(o.source1, "%s", argv[optind]);
+      o.source2 = malloc(sizeof(char) * strlen(argv[optind+1])+1);
+      sprintf(o.source2, "%s", argv[optind+1]);
+      o.dest = malloc(sizeof(char) * strlen(argv[optind+2])+1);
+      sprintf(o.dest, "%s", argv[optind+2]);
 		}
 
 	if(o.debug) {
@@ -772,6 +778,7 @@ int main(int argc, char *argv[]) {
 		printf(" {arguments} \n");
 		printf("    bitlevel: %d\n",o.bitlevel);
 		printf("    decode: %d\n",o.decode);
+		printf("    equalize: %d\n",o.equalize);
 		printf("    force: %d\n",o.force);
 		printf("    interactive: %d\n",o.interactive);
 		printf("    run: %d\n",o.run);
@@ -794,20 +801,25 @@ int main(int argc, char *argv[]) {
 		process_text(o.source1);
 		read_png_file(o.source2);
 		encode_png_header();
-		encode_png_file();
+		encode_png_file(o);
 		//Test Data one
-		char* md5_source = (char*) malloc (sizeof(char)*32);
+		char* md5_source = (char*) malloc (sizeof(char)*33);
 		strncpy(md5_source,md5buffer(data.buffer,data.length),sizeof(char) * 32);
+		md5_source[32] = '\0';
 		printf("md5: %s\n",md5_source);
 		if(o.debug)
 			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
 
 		decode_png_header();
+		data.buffer = calloc(data.length + 1, sizeof(char));
 		decode_png_file();
 		//Test Data two
-		char* md5_dest = (char*) malloc (sizeof(char)*32);
+		char* md5_dest = (char*) malloc (sizeof(char)*33);
 		strncpy(md5_dest,md5buffer(data.buffer,data.length),sizeof(char) * 32);
+		md5_dest[32] = '\0';
 		printf("md5: %s\n",md5_dest);
+		BIO_dump_fp (stdout, (const char *)md5_source, CHAR_BIT*sizeof(md5_dest));
+		BIO_dump_fp (stdout, (const char *)md5_dest, CHAR_BIT*sizeof(md5_dest));
 
 		//Compare MD5 Sum
 		if (strncmp (md5_source,md5_dest,32) == 0)
@@ -824,10 +836,52 @@ int main(int argc, char *argv[]) {
 		exit (EXIT_SUCCESS);
 	}
 
+	if(o.run) {
+		char msg;
+		printf("\nRun this image? (y/n): \n");
+		scanf(" %c", &msg);
+		if(msg != 'y' && msg != 'Y') {
+			printf("Exiting\n");
+			exit (EXIT_SUCCESS);
+		}
+		data.encode = o.bitlevel;
+		read_png_file(o.source1);
+		decode_png_header();
+		decode_png_file(o);
+		if(o.debug)
+			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
+		if(o.verbose)
+			printf("Running the image!\n");
+
+		/* create a child process to handle the image application */
+		pid_t pid = fork();
+		if (pid == -1)
+        	perror("fork error");
+		else if (pid == 0) {
+			/* Start Executable Section */
+
+			/* Fill in the magic here */
+			/* Remember to make buffer into a executable buffer */
+			/* Internet is very handy to do this */
+			/* Especially shellcode executes */
+
+			/* End Executable Section */
+			printf("error running execlp\n");
+		}
+
+		/* wait for the child process to end/die */
+		wait(NULL);
+		printf("Child process Exit\n");
+
+		close_data(data);
+
+		exit (EXIT_SUCCESS);
+	}
 
 	/* Encode the image */
 	if(o.decode == false) {
-
+		if(o.verbose)
+			printf("Encoding into a png image\n");
 		data.encode = o.bitlevel;
 		process_text(o.source1);
 		read_png_file(o.source2);
@@ -843,7 +897,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		encode_png_header();
-		encode_png_file();
+		encode_png_file(o);
 		if(o.debug)
 			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
 
@@ -857,12 +911,11 @@ int main(int argc, char *argv[]) {
 		read_png_file(o.source1);
 		decode_png_header();
 		decode_png_file();
-		close_data(data);
-
 		if(o.debug)
 			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
-
 		write_text(o.dest);
+		close_data(data);
+
 	}
 	return 0;
 }
