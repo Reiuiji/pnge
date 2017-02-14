@@ -1,0 +1,7 @@
+
+all:
+	gcc pnge.c -lpng -lcrypto -o pnge.exe
+
+clean: 
+	rm pnge.exe
+
