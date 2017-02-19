@@ -89,6 +89,34 @@ static struct option const long_opts[] =
   {NULL, 0, NULL, 0}
 };
 
+
+bool file_write_check(char *filename, pnge_options options)
+{
+	/* force will always ourput true */
+	if(options.force)
+		return true;
+
+	/* Check if text exist */
+	if( access(filename, F_OK) != -1 ) {
+		printf("file exist\n");
+		/* interactive mode */
+		if(options.interactive) {
+			char msg;
+			printf("do you want to overwrite %s (y/n): ",filename);
+			scanf(" %c", &msg);
+			if(msg != 'y' && msg != 'Y') {
+				printf("skipping saving\n");
+				return false;
+			}
+			return true;
+		}
+		printf("Skiping saving!! Check filename or put -f or -i to overwrite\n");
+		return false;
+	} else {
+		return true;
+	}
+}
+
 void read_png_file(char *filename) {
 	FILE *fp = fopen(filename, "rb");
 
@@ -147,7 +175,9 @@ void read_png_file(char *filename) {
 	fclose(fp);
 }
 
-void write_png_file(char *filename) {
+void write_png_file(char *filename,pnge_options options) {
+	if(file_write_check(filename, options) == false)
+		return;
 	int y;
 
 	FILE *fp = fopen(filename, "wb");
@@ -471,7 +501,6 @@ void decode_png_file(pnge_options options) {
 
 void process_text(char *filename)
 {
-	DataPayload DP;
 	FILE *fp = fopen(filename, "rb");
 	if (fp != NULL) {
 		/* Go to the end of the file. */
@@ -531,9 +560,11 @@ char * md5buffer(char *buffer, int length)
 	return md5sum;
 }
 
-void write_text(char *filename)
+void write_text(char *filename, pnge_options options)
 {
-	DataPayload DP;
+	if(file_write_check(filename, options) == false)
+		return;
+
 	FILE *fp = fopen(filename, "wb");
 	if (fp != NULL) {
 		size_t newLen = fwrite(data.buffer, data.length,sizeof(char),fp);
@@ -541,6 +572,7 @@ void write_text(char *filename)
 	}
 
 }
+
 
 /* Handle user input nicely fnctions */
 
@@ -902,7 +934,7 @@ int main(int argc, char *argv[]) {
 			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
 
 		close_data(data);
-		write_png_file(o.dest);
+		write_png_file(o.dest,o);
 		exit (EXIT_SUCCESS);
 
 	} else { /* Decode Image */
@@ -913,7 +945,7 @@ int main(int argc, char *argv[]) {
 		decode_png_file(o);
 		if(o.debug)
 			BIO_dump_fp (stdout, (const char *)data.buffer, data.length);
-		write_text(o.dest);
+		write_text(o.dest,o);
 		close_data(data);
 
 	}
