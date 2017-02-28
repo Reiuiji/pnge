@@ -1,0 +1,23 @@
+Stuff need todo
+[ ]	Encryption
+[ ] Standardize format
+	- packet version
+	- secure mode? <- keep anonymize secure is hidden until the application tries to decrypt the random data
+	- extension (png,zip,etc)
+	- bit encoding
+	- length
+	- integrity check code (parity of data) 
+	- Header check (yes continue to grab data, no exit saying not an incoded imaged)
+[X]	Equalize randomness on the image to prevent one section marked with encryption
+[ ] Give a image statistics to tell the capabilites of the image and how much data can fit in (check/stats)
+[ ]	Fix up run
+[ ]	Fix up debug and verbose stuff
+	debug - output dump data
+	verbose - tells what it is doing
+[ ] Create standard libraries for each to maintain sanity
+	- cli
+	- gui
+	- utility (pngeutil.h)
+	- secure (openssl_api.h)
+[ ] Write report
+
