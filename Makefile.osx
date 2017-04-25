@@ -1,6 +1,6 @@
 
 all:
-	gcc -I/usr/local/include -L/usr/local/lib -I/usr/local/opt/openssl/include -L/usr/local/opt/openssl/lib -lm -lpng -lcrypto -std=c11 pnge.c -o pnge
+	gcc -I/usr/local/include -L/usr/local/lib -I/usr/local/opt/openssl/include -L/usr/local/opt/openssl/lib -lm -lpng -lcrypto -std=c11 src/pngecli.c -o pnge
 
 clean: 
 	rm pnge
