@@ -1,0 +1,12 @@
+This is an example message that can be encoded in a pnge.
+If this outputs proper in the test then everything (99%) works!!!
+
+Inserting some arbitrary data
+
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+[]\{}|;':",./<>?
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+[]\{}|;':",./<>?
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+[]\{}|;':",./<>?
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+[]\{}|;':",./<>?
+abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`~!@#$%^&*()_+[]\{}|;':",./<>?
+
+Always double check the values just in case a miss hap.
