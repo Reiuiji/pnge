@@ -17,7 +17,11 @@ Stuff need todo
 [ ] Create standard libraries for each to maintain sanity
 	- cli
 	- gui
-	- utility (pngeutil.h)
+	- utility (pngelib.h)
 	- secure (openssl_api.h)
 [ ] Write report
 
+Notes
+Decrypt header:
+  Grab first block (256) and decrypt it. Read header tag on size and go from there like usual
+  This will allow for the header to be encrypted as well ^.^
